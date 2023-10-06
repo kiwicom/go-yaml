@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/lexer"
 	"github.com/goccy/go-yaml/parser"
@@ -808,6 +809,125 @@ foo: > # comment
 	}
 }
 
+func TestCommentWithNull(t *testing.T) {
+	t.Run("same line", func(t *testing.T) {
+		content := `
+foo:
+  bar: # comment
+  baz: 1
+`
+		expected := `
+foo:
+  bar: null # comment
+  baz: 1`
+		f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(f.Docs) != 1 {
+			t.Fatal("failed to parse content with same line comment")
+		}
+		if f.Docs[0].String() != strings.TrimPrefix(expected, "\n") {
+			t.Fatal("failed to parse comment")
+		}
+	})
+	t.Run("next line", func(t *testing.T) {
+		content := `
+foo:
+  bar:
+    # comment
+  baz: 1
+`
+		expected := `
+foo:
+  bar: null # comment
+  baz: 1`
+		f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(f.Docs) != 1 {
+			t.Fatal("failed to parse content with next line comment")
+		}
+		if f.Docs[0].String() != strings.TrimPrefix(expected, "\n") {
+			t.Fatal("failed to parse comment")
+		}
+	})
+	t.Run("next line and different indent", func(t *testing.T) {
+		content := `
+foo:
+  bar:
+ # comment
+baz: 1`
+		f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(f.Docs) != 1 {
+			t.Fatal("failed to parse content with next line comment")
+		}
+		expected := `
+foo:
+  bar: null # comment
+baz: 1`
+		if f.Docs[0].String() != strings.TrimPrefix(expected, "\n") {
+			t.Fatal("failed to parse comment")
+		}
+	})
+}
+
+func TestSequenceComment(t *testing.T) {
+	content := `
+foo:
+  - # comment
+    bar: 1
+baz:
+  - xxx
+`
+	f, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Docs) != 1 {
+		t.Fatal("failed to parse content with next line with sequence")
+	}
+	expected := `
+foo:
+  # comment
+  - bar: 1
+baz:
+  - xxx`
+	if f.Docs[0].String() != strings.TrimPrefix(expected, "\n") {
+		t.Fatal("failed to parse comment")
+	}
+	t.Run("foo[0].bar", func(t *testing.T) {
+		path, err := yaml.PathString("$.foo[0].bar")
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := path.FilterFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.String() != "1" {
+			t.Fatal("failed to get foo[0].bar value")
+		}
+	})
+	t.Run("baz[0]", func(t *testing.T) {
+		path, err := yaml.PathString("$.baz[0]")
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := path.FilterFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.String() != "xxx" {
+			t.Fatal("failed to get baz[0] value")
+		}
+	})
+}
+
 func TestNodePath(t *testing.T) {
 	yml := `
 a: # commentA
@@ -824,6 +944,8 @@ a: # commentA
   i: fuga # commentI
 j: piyo # commentJ
 k.l.m.n: moge # commentKLMN
+o#p: hogera # commentOP
+q#.r: hogehoge # commentQR
 `
 	f, err := parser.ParseBytes([]byte(yml), parser.ParseComments)
 	if err != nil {
@@ -854,6 +976,8 @@ k.l.m.n: moge # commentKLMN
 		"$.a.i",
 		"$.j",
 		"$.'k.l.m.n'",
+		"$.o#p",
+		"$.'q#.r'",
 	}
 	if !reflect.DeepEqual(expectedPaths, commentPaths) {
 		t.Fatalf("failed to get YAMLPath to the comment node:\nexpected[%s]\ngot     [%s]", expectedPaths, commentPaths)

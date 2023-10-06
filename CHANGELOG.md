@@ -1,3 +1,38 @@
+# 1.11.2 - 2023-09-15
+
+### Fix bugs
+
+- Fix quoted comments ( #370 )
+- Fix handle of space at start or last ( #376 )
+- Fix sequence with comment ( #390 )
+
+# 1.11.1 - 2023-09-14
+
+### Fix bugs
+
+- Handle `\r` in a double-quoted string the same as `\n` ( #372 )
+- Replace loop with n.Values = append(n.Values, target.Values...) ( #380 )
+- Skip encoding an inline field if it is null ( #386 )
+- Fix comment parsing with null value ( #388 )
+
+# 1.11.0 - 2023-04-03
+
+### Features
+
+- Supports dynamically switch encode and decode processing for a given type
+
+# 1.10.1 - 2023-03-28
+
+### Features
+
+- Quote YAML 1.1 bools at encoding time for compatibility with other legacy parsers
+- Add support of 32-bit architecture
+
+### Fix bugs
+
+- Don't trim all space characters in block style sequence
+- Support strings starting with `@`
+
 # 1.10.0 - 2023-03-01
 
 ### Fix bugs

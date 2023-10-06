@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/goccy/go-yaml/parser"
 	"math"
 	"reflect"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/goccy/go-yaml/parser"
 
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
@@ -303,6 +304,21 @@ func TestEncoder(t *testing.T) {
 			nil,
 		},
 		{
+			"a: \" b\"\n",
+			map[string]string{"a": " b"},
+			nil,
+		},
+		{
+			"a: \"b \"\n",
+			map[string]string{"a": "b "},
+			nil,
+		},
+		{
+			"a: \" b \"\n",
+			map[string]string{"a": " b "},
+			nil,
+		},
+		{
 			"a: 100.5\n",
 			map[string]interface{}{
 				"a": 100.5,
@@ -441,7 +457,7 @@ func TestEncoder(t *testing.T) {
 		},
 
 		{
-			"a:\n  y: \"\"\n",
+			"a:\n  \"y\": \"\"\n",
 			struct {
 				A *struct {
 					X string `yaml:"x,omitempty"`
@@ -703,7 +719,7 @@ func TestEncodeStructIncludeMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%+v", err)
 	}
-	expect := "a:\n  m:\n    x: y\n"
+	expect := "a:\n  m:\n    x: \"y\"\n"
 	actual := string(bytes)
 	if actual != expect {
 		t.Fatalf("unexpected output. expect:[%s] actual:[%s]", expect, actual)
@@ -721,7 +737,7 @@ func TestEncodeDefinedTypeKeyMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%+v", err)
 	}
-	expect := "m:\n  x: y\n"
+	expect := "m:\n  x: \"y\"\n"
 	actual := string(bytes)
 	if actual != expect {
 		t.Fatalf("unexpected output. expect:[%s] actual:[%s]", expect, actual)
@@ -979,6 +995,30 @@ c: true
 	}
 }
 
+func TestEncoder_InlineNil(t *testing.T) {
+	type base struct {
+		A int
+		B string
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	if err := enc.Encode(struct {
+		*base `yaml:",inline"`
+		C     bool
+	}{
+		C: true,
+	}); err != nil {
+		t.Fatalf("%+v", err)
+	}
+	expect := `
+c: true
+`
+	actual := "\n" + buf.String()
+	if expect != actual {
+		t.Fatalf("inline marshal error: expect=[%s] actual=[%s]", expect, actual)
+	}
+}
+
 func TestEncoder_Flow(t *testing.T) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf, yaml.Flow(true))
@@ -1175,6 +1215,40 @@ a:
 	if expected != "\n"+string(got) {
 		t.Fatalf("failed to use json marshaler. expected [%q] but got [%q]", expected, string(got))
 	}
+}
+
+func TestEncoder_CustomMarshaler(t *testing.T) {
+	t.Run("override struct type", func(t *testing.T) {
+		type T struct {
+			Foo string `yaml:"foo"`
+		}
+		b, err := yaml.MarshalWithOptions(&T{Foo: "bar"}, yaml.CustomMarshaler[T](func(v T) ([]byte, error) {
+			return []byte(`"override"`), nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(b, []byte("\"override\"\n")) {
+			t.Fatalf("failed to switch to custom marshaler. got: %q", b)
+		}
+	})
+	t.Run("override bytes type", func(t *testing.T) {
+		type T struct {
+			Foo []byte `yaml:"foo"`
+		}
+		b, err := yaml.MarshalWithOptions(&T{Foo: []byte("bar")}, yaml.CustomMarshaler[[]byte](func(v []byte) ([]byte, error) {
+			if !bytes.Equal(v, []byte("bar")) {
+				t.Fatalf("failed to get src buffer: %q", v)
+			}
+			return []byte(`override`), nil
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(b, []byte("foo: override\n")) {
+			t.Fatalf("failed to switch to custom marshaler. got: %q", b)
+		}
+	})
 }
 
 func TestEncoder_MultipleDocuments(t *testing.T) {
@@ -1401,20 +1475,42 @@ func Example_MarshalYAML() {
 }
 
 func TestIssue356(t *testing.T) {
-	in := `args:
+	tests := map[string]struct {
+		in string
+	}{
+		"content on first line": {
+			in: `args:
   - |
+
     key:
       nest1: something
       nest2:
         nest2a: b
-`
-	f, err := parser.ParseBytes([]byte(in), 0)
-	if err != nil {
-		t.Fatalf("parse: %v", err)
+`,
+		},
+		"empty first line": {
+			in: `args:
+  - |
+
+    key:
+      nest1: something
+      nest2:
+        nest2a: b
+`,
+		},
 	}
-	got := f.String()
-	if in != got {
-		t.Fatalf("failed to encode.\nexpected:\n%s\nbut got:\n%s\n", in, got)
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			f, err := parser.ParseBytes([]byte(test.in), 0)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			got := f.String()
+			if test.in != got {
+				t.Fatalf("failed to encode.\nexpected:\n%s\nbut got:\n%s\n", test.in, got)
+			}
+		})
 	}
 }
 

@@ -2,6 +2,7 @@ package yaml_test
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -95,7 +96,7 @@ a:
   b: hello
   c: true
   d:
-    x: y
+    x: "y"
 b:
   a: 2
   b: world
@@ -1159,4 +1160,125 @@ hoge:
 			}
 		}
 	})
+}
+
+func TestCommentMapRoundTrip(t *testing.T) {
+	// test that an unmarshal and marshal round trip retains comments.
+	// if expect is empty, the test will use the input as the expected result.
+	tests := []struct {
+		name          string
+		source        string
+		expect        string
+		encodeOptions []yaml.EncodeOption
+	}{
+		{
+			name: "simple map",
+			source: `
+# head
+a: 1 # line
+# foot
+`,
+		},
+		{
+			name: "nesting",
+			source: `
+- 1 # one
+- foo:
+    a: b
+    # c comment
+    c: d # d comment
+    "e#f": g # g comment
+    h.i: j # j comment
+    "k.#l": m # m comment
+`,
+		},
+		{
+			name:          "single quotes",
+			source:        `'a#b': c # c comment`,
+			encodeOptions: []yaml.EncodeOption{yaml.UseSingleQuote(true)},
+		},
+		{
+			name:          "single quotes added in encode",
+			source:        `a#b: c # c comment`,
+			encodeOptions: []yaml.EncodeOption{yaml.UseSingleQuote(true)},
+			expect:        `'a#b': c # c comment`,
+		},
+		{
+			name:          "double quotes quotes transformed to single quotes",
+			source:        `"a#b": c # c comment`,
+			encodeOptions: []yaml.EncodeOption{yaml.UseSingleQuote(true)},
+			expect:        `'a#b': c # c comment`,
+		},
+		{
+			name:   "single quotes quotes transformed to double quotes",
+			source: `'a#b': c # c comment`,
+			expect: `"a#b": c # c comment`,
+		},
+		{
+			name:   "single quotes removed",
+			source: `'a': b # b comment`,
+			expect: `a: b # b comment`,
+		},
+		{
+			name:   "double quotes removed",
+			source: `"a": b # b comment`,
+			expect: `a: b # b comment`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var val any
+			cm := yaml.CommentMap{}
+			source := strings.TrimSpace(test.source)
+			if err := yaml.UnmarshalWithOptions([]byte(source), &val, yaml.CommentToMap(cm)); err != nil {
+				t.Fatalf("%+v", err)
+			}
+			marshaled, err := yaml.MarshalWithOptions(val, append(test.encodeOptions, yaml.WithComment(cm))...)
+			if err != nil {
+				t.Fatalf("%+v", err)
+			}
+			got := strings.TrimSpace(string(marshaled))
+			expect := strings.TrimSpace(test.expect)
+			if expect == "" {
+				expect = source
+			}
+			if got != expect {
+				t.Fatalf("expected:\n%s\ngot:\n%s\n", expect, got)
+			}
+		})
+
+	}
+}
+
+func TestRegisterCustomMarshaler(t *testing.T) {
+	type T struct {
+		Foo []byte `yaml:"foo"`
+	}
+	yaml.RegisterCustomMarshaler[T](func(_ T) ([]byte, error) {
+		return []byte(`"override"`), nil
+	})
+	b, err := yaml.Marshal(&T{Foo: []byte("bar")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(b, []byte("\"override\"\n")) {
+		t.Fatalf("failed to register custom marshaler. got: %q", b)
+	}
+}
+
+func TestRegisterCustomUnmarshaler(t *testing.T) {
+	type T struct {
+		Foo []byte `yaml:"foo"`
+	}
+	yaml.RegisterCustomUnmarshaler[T](func(v *T, _ []byte) error {
+		v.Foo = []byte("override")
+		return nil
+	})
+	var v T
+	if err := yaml.Unmarshal([]byte(`"foo: "bar"`), &v); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(v.Foo, []byte("override")) {
+		t.Fatalf("failed to decode. got %q", v.Foo)
+	}
 }

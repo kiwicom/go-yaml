@@ -68,6 +68,18 @@ func TestDecoder(t *testing.T) {
 			map[string]string{"v": "1.234"},
 		},
 		{
+			"v: \" foo\"\n",
+			map[string]string{"v": " foo"},
+		},
+		{
+			"v: \"foo \"\n",
+			map[string]string{"v": "foo "},
+		},
+		{
+			"v: \" foo \"\n",
+			map[string]string{"v": " foo "},
+		},
+		{
 			"v: false\n",
 			map[string]bool{"v": false},
 		},
@@ -424,6 +436,14 @@ func TestDecoder(t *testing.T) {
 		{
 			`"1": "a\x2Fb\u002Fc\U0000002Fd"`,
 			map[interface{}]interface{}{"1": `a/b/c/d`},
+		},
+		{
+			"'1': \"2\\n3\"",
+			map[interface{}]interface{}{"1": "2\n3"},
+		},
+		{
+			"'1': \"2\\r\\n3\"",
+			map[interface{}]interface{}{"1": "2\r\n3"},
 		},
 
 		{
@@ -1856,6 +1876,54 @@ func TestDecoder_UseJSONUnmarshaler(t *testing.T) {
 	if v.s != "a" {
 		t.Fatalf("unexpected decoded value: %s", v.s)
 	}
+}
+
+func TestDecoder_CustomUnmarshaler(t *testing.T) {
+	t.Run("override struct type", func(t *testing.T) {
+		type T struct {
+			Foo string `yaml:"foo"`
+		}
+		src := []byte(`foo: "bar"`)
+		var v T
+		if err := yaml.UnmarshalWithOptions(src, &v, yaml.CustomUnmarshaler[T](func(dst *T, b []byte) error {
+			if !bytes.Equal(src, b) {
+				t.Fatalf("failed to get decode target buffer. expected %q but got %q", src, b)
+			}
+			var v T
+			if err := yaml.Unmarshal(b, &v); err != nil {
+				return err
+			}
+			if v.Foo != "bar" {
+				t.Fatal("failed to decode")
+			}
+			dst.Foo = "bazbaz" // assign another value to target
+			return nil
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if v.Foo != "bazbaz" {
+			t.Fatalf("failed to switch to custom unmarshaler. got: %v", v.Foo)
+		}
+	})
+	t.Run("override bytes type", func(t *testing.T) {
+		type T struct {
+			Foo []byte `yaml:"foo"`
+		}
+		src := []byte(`foo: "bar"`)
+		var v T
+		if err := yaml.UnmarshalWithOptions(src, &v, yaml.CustomUnmarshaler[[]byte](func(dst *[]byte, b []byte) error {
+			if !bytes.Equal(b, []byte(`"bar"`)) {
+				t.Fatalf("failed to get target buffer: %q", b)
+			}
+			*dst = []byte("bazbaz")
+			return nil
+		})); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(v.Foo, []byte("bazbaz")) {
+			t.Fatalf("failed to switch to custom unmarshaler. got: %q", v.Foo)
+		}
+	})
 }
 
 type unmarshalContext struct {
